@@ -1,11 +1,11 @@
 import "./globals.css";
-import "@solana/wallet-adapter-react-ui/styles.css";
 
 import { Geist, Geist_Mono } from "next/font/google";
 
 import type { Metadata } from "next";
 import { Toaster } from "sonner";
-import { SolanaProvider } from "@/components/provider/Solana";
+import { HederaProvider } from "@/components/provider/Hedera";
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -18,7 +18,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Aethera",
-  description: "A minimal frontend for Anchor counter program",
+  description: "A minimal frontend for Hedera smart contract",
 };
 
 export default function RootLayout({
@@ -31,7 +31,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-950 text-white`}
       >
-        <SolanaProvider>
+        <HederaProvider>
           {children}
           <Toaster
             position="bottom-right"
@@ -50,7 +50,7 @@ export default function RootLayout({
               className: "toast-container",
             }}
           />
-        </SolanaProvider>
+        </HederaProvider>
       </body>
     </html>
   );

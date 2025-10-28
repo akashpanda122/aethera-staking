@@ -1,18 +1,16 @@
 'use client'
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { PublicKey } from '@solana/web3.js';
-import { useConnection } from '@solana/wallet-adapter-react';
+import { AccountId, ContractId, ContractExecuteTransaction, ContractFunctionParameters, Hbar, ContractCallQuery } from "@hashgraph/sdk";
 import './body.css';
-import { useProgram } from "./hooks/useProgram";
-import * as anchor from "@coral-xyz/anchor";
+import { useHedera } from "./hooks/useHedera";
 import { toast } from "sonner";
 import { ToastContent } from "./ToastContent";
 
 interface PlayerAccount {
     stakedAmount: number;
-    stakedTime: anchor.BN;
-    durationTime: anchor.BN;
-    rewardAmount: anchor.BN;
+    stakedTime: number;
+    durationTime: number;
+    rewardAmount: number;
 }
 
 interface DurationButton {
@@ -22,8 +20,8 @@ interface DurationButton {
     isActive: boolean;
 }
 
-const STAKE_NAME = "SOL";
-const authority = new PublicKey("7ivunejTCC3g6gWqYZqVRpthdyj29vPmVas5YcCy5Yh8");
+const STAKE_NAME = "HBAR";
+const CONTRACT_ID = "0.0.YOUR_CONTRACT_ID"; // Replace with your deployed contract ID
 
 const initialButtonsData: DurationButton[] = [
     { id: 0, durName: "7 days", durVal: 7, isActive: true },
@@ -33,8 +31,7 @@ const initialButtonsData: DurationButton[] = [
 ];
 
 export const Body = () => {
-    const { program, publicKey } = useProgram();
-    const { connection } = useConnection();
+    const { accountId, hashconnect, provider } = useHedera();
     
     // State management
     const [buttons, setButtons] = useState<DurationButton[]>(initialButtonsData);
@@ -49,41 +46,60 @@ export const Body = () => {
 
     // Memoized values
     const stakeTypeInSeconds = useMemo(() => stakeType * 86400, [stakeType]);
-    const stakeAmountInLamports = useMemo(() => stakeAmount * 1e9, [stakeAmount]);
+    const stakeAmountInTinybars = useMemo(() => stakeAmount * 1e8, [stakeAmount]); // HBAR to tinybars
 
     // Callbacks
-    const getPlayerData = useCallback(async (player: PublicKey): Promise<PlayerAccount | null> => {
-        const [playerPDA] = PublicKey.findProgramAddressSync(
-            [Buffer.from('player'), authority.toBuffer(), player.toBuffer()],
-            program.programId
-        );
-        try {
-            return await program.account.playerAccount.fetch(playerPDA) as PlayerAccount;
-        } catch {
-            return null;
-        }
-    }, [program]);
-
-    const refreshBalances = useCallback(async () => {
-        if (!publicKey) return;
+    const getPlayerData = useCallback(async (player: string): Promise<PlayerAccount | null> => {
+        if (!provider) return null;
         
         try {
-            const balance = await connection.getBalance(publicKey);
-            setBalance(balance / 1e9);
+            const query = new ContractCallQuery()
+                .setContractId(ContractId.fromString(CONTRACT_ID))
+                .setGas(100000)
+                .setFunction("getPlayerData", new ContractFunctionParameters().addAddress(player));
+
+            const result = await query.execute(provider);
             
-            const player = await getPlayerData(publicKey);
-            setStakedAmount(Number(player?.stakedAmount || 0) / 1e9);
-            setStakedDuration(Number(player?.durationTime || 0));
-            setRewardAmount(Number(player?.rewardAmount || 0) / 1e9);
-            setStakeTime(player?.stakedTime.toString() || '');
+            // Parse the contract response (adjust based on your contract's return structure)
+            const stakedAmount = result.getUint256(0).toNumber();
+            const stakedTime = result.getUint256(1).toNumber();
+            const durationTime = result.getUint256(2).toNumber();
+            const rewardAmount = result.getUint256(3).toNumber();
+
+            return {
+                stakedAmount,
+                stakedTime,
+                durationTime,
+                rewardAmount
+            };
+        } catch (error) {
+            console.error("Error fetching player data:", error);
+            return null;
+        }
+    }, [provider]);
+
+    const refreshBalances = useCallback(async () => {
+        if (!accountId || !provider) return;
+        
+        try {
+            // Get HBAR balance from Hedera
+            const accountBalance = await provider.getAccountBalance(accountId);
+            setBalance(accountBalance.hbars.toTinybars().toNumber() / 1e8);
+            
+            // Get player staking data from contract
+            const player = await getPlayerData(accountId);
+            setStakedAmount((player?.stakedAmount || 0) / 1e8);
+            setStakedDuration(player?.durationTime || 0);
+            setRewardAmount((player?.rewardAmount || 0) / 1e8);
+            setStakeTime(player?.stakedTime?.toString() || '');
         } catch (error) {
             console.error("Error refreshing balances:", error);
         }
-    }, [publicKey, connection, getPlayerData]);
+    }, [accountId, provider, getPlayerData]);
 
     const handleStakeAmountChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const amount = e.target.value;
-        if (!amount || amount.match(/^\d{1,}(\.\d{0,2})?$/)) {
+        if (!amount || amount.match(/^\d{1,}(\.\d{0,8})?$/)) {
             setStakeAmount(Number(amount));
         }
     }, []);
@@ -103,7 +119,7 @@ export const Body = () => {
         successMessage: string,
         errorMessage: string
     ) => {
-        if (!publicKey) {
+        if (!accountId) {
             toast.warning("Please connect your wallet");
             return;
         }
@@ -112,11 +128,11 @@ export const Body = () => {
         setLoading(true);
 
         try {
-            const txSignature = await action();
-            const explorerUrl = `https://explorer.solana.com/tx/${txSignature}?cluster=devnet`;
+            const txId = await action();
+            const explorerUrl = `https://hashscan.io/testnet/transaction/${txId}`;
             
             toast.success(successMessage, {
-                description: <ToastContent transactionSignature={txSignature} explorerUrl={explorerUrl} />,
+                description: <ToastContent transactionSignature={txId} explorerUrl={explorerUrl} />,
                 style: {
                     backgroundColor: "#1f1f23",
                     border: "1px solid rgba(139, 92, 246, 0.3)",
@@ -141,10 +157,10 @@ export const Body = () => {
         } finally {
             setLoading(false);
         }
-    }, [publicKey, refreshBalances]);
+    }, [accountId, refreshBalances]);
 
     const stake = useCallback(async () => {
-        if (!publicKey) {
+        if (!accountId || !hashconnect || !provider) {
             toast.warning("Please connect your wallet");
             return;
         }
@@ -160,76 +176,105 @@ export const Body = () => {
         }
 
         await handleTransaction(
-            () => program.methods
-                .solStake(new anchor.BN(stakeAmountInLamports), new anchor.BN(stakeTypeInSeconds))
-                .accounts({ authority, player: publicKey as PublicKey })
-                .rpc(),
+            async () => {
+                const transaction = new ContractExecuteTransaction()
+                    .setContractId(ContractId.fromString(CONTRACT_ID))
+                    .setGas(300000)
+                    .setPayableAmount(new Hbar(stakeAmount))
+                    .setFunction(
+                        "stake",
+                        new ContractFunctionParameters()
+                            .addUint256(stakeTypeInSeconds)
+                    );
+
+                const signer = hashconnect.getSigner(AccountId.fromString(accountId));
+                const txResponse = await transaction.executeWithSigner(signer);
+                const receipt = await txResponse.getReceiptWithSigner(signer);
+                
+                return txResponse.transactionId.toString();
+            },
             "Staking...",
             "Staking Successful!",
             "Staking Failed"
         );
 
         setStakeAmount(0);
-    }, [stakeAmount, balance, stakeAmountInLamports, stakeTypeInSeconds, program, publicKey, handleTransaction]);
+    }, [stakeAmount, balance, stakeTypeInSeconds, accountId, hashconnect, provider, handleTransaction]);
 
     const unstake = useCallback(async () => {
-        if (!publicKey) {
+        if (!accountId || !hashconnect || !provider) {
             toast.warning("Please connect your wallet");
             return;
         }
 
-        const player = await getPlayerData(publicKey);
+        const player = await getPlayerData(accountId);
         if (!player || player.stakedAmount === 0) {
             toast.error("No staked amount found");
             return;
         }
 
         await handleTransaction(
-            () => program.methods
-                .solUnstake()
-                .accounts({ authority, player: publicKey as PublicKey })
-                .rpc(),
+            async () => {
+                const transaction = new ContractExecuteTransaction()
+                    .setContractId(ContractId.fromString(CONTRACT_ID))
+                    .setGas(300000)
+                    .setFunction("unstake");
+
+                const signer = hashconnect.getSigner(AccountId.fromString(accountId));
+                const txResponse = await transaction.executeWithSigner(signer);
+                const receipt = await txResponse.getReceiptWithSigner(signer);
+                
+                return txResponse.transactionId.toString();
+            },
             "Unstaking...",
             "Unstaking Successful!",
             "Unstaking Failed"
         );
-    }, [publicKey, getPlayerData, program, handleTransaction]);
+    }, [accountId, hashconnect, provider, getPlayerData, handleTransaction]);
 
     const claimRewards = useCallback(async () => {
-        if (!publicKey) {
+        if (!accountId || !hashconnect || !provider) {
             toast.warning("Please connect your wallet");
             return;
         }
 
-        const player = await getPlayerData(publicKey);
+        const player = await getPlayerData(accountId);
         if (!player || player.stakedAmount === 0) {
             toast.error("No rewards available to claim");
             return;
         }
 
         await handleTransaction(
-            () => program.methods
-                .claimRewards()
-                .accounts({ authority, player: publicKey as PublicKey })
-                .rpc(),
+            async () => {
+                const transaction = new ContractExecuteTransaction()
+                    .setContractId(ContractId.fromString(CONTRACT_ID))
+                    .setGas(300000)
+                    .setFunction("claimRewards");
+
+                const signer = hashconnect.getSigner(AccountId.fromString(accountId));
+                const txResponse = await transaction.executeWithSigner(signer);
+                const receipt = await txResponse.getReceiptWithSigner(signer);
+                
+                return txResponse.transactionId.toString();
+            },
             "Claiming rewards...",
             "Rewards Claimed Successfully!",
             "Failed to Claim Rewards"
         );
-    }, [publicKey, getPlayerData, program, handleTransaction]);
+    }, [accountId, hashconnect, provider, getPlayerData, handleTransaction]);
 
     // Effects
     useEffect(() => {
         refreshBalances();
-    }, [publicKey, connection, refreshBalances]);
+    }, [accountId, refreshBalances]);
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-950 via-emerald-950 to-slate-950 p-6 md:p-12">
+        <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950 to-slate-950 p-6 md:p-12">
             <div className="max-w-7xl mx-auto">
                 {/* Header Section */}
                 <div className="mb-12 animate-fade-in">
-                    <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-emerald-400 via-cyan-400 to-emerald-300 bg-clip-text text-transparent mb-2">{STAKE_NAME} Staking</h1>
-                    <p className="text-slate-400 text-lg">Earn rewards while supporting green energy initiatives</p>
+                    <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-purple-300 bg-clip-text text-transparent mb-2">{STAKE_NAME} Staking</h1>
+                    <p className="text-slate-400 text-lg">Earn rewards on Hedera Hashgraph</p>
                 </div>
 
 
@@ -238,32 +283,32 @@ export const Body = () => {
                     <div className="lg:col-span-2 space-y-6">
                         {/* Balance Cards */}
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="backdrop-blur-xl bg-white/5 border border-emerald-500/20 rounded-2xl p-6 hover:border-emerald-400/40 transition-all duration-300 hover:bg-white/8">
+                            <div className="backdrop-blur-xl bg-white/5 border border-purple-500/20 rounded-2xl p-6 hover:border-purple-400/40 transition-all duration-300 hover:bg-white/8">
                                 <p className="text-slate-400 text-sm font-medium mb-2">Available Balance</p>
-                                <p className="text-3xl font-bold text-emerald-300">{balance.toFixed(4)}</p>
+                                <p className="text-3xl font-bold text-purple-300">{balance.toFixed(4)}</p>
                                 <p className="text-slate-500 text-xs mt-1">{STAKE_NAME}</p>
                             </div>
-                            <div className="backdrop-blur-xl bg-white/5 border border-cyan-500/20 rounded-2xl p-6 hover:border-cyan-400/40 transition-all duration-300 hover:bg-white/8">
+                            <div className="backdrop-blur-xl bg-white/5 border border-pink-500/20 rounded-2xl p-6 hover:border-pink-400/40 transition-all duration-300 hover:bg-white/8">
                                 <p className="text-slate-400 text-sm font-medium mb-2">Staked Balance</p>
-                                <p className="text-3xl font-bold text-cyan-300">{stakedAmount.toFixed(4)}</p>
+                                <p className="text-3xl font-bold text-pink-300">{stakedAmount.toFixed(4)}</p>
                                 <p className="text-slate-500 text-xs mt-1">{STAKE_NAME}</p>
                             </div>
                         </div>
 
                         {/* Stake Input Section */}
-                        <div className="backdrop-blur-xl bg-gradient-to-br from-white/8 to-white/5 border border-emerald-500/30 rounded-2xl p-8 shadow-2xl hover:shadow-emerald-500/10 transition-all duration-300">
+                        <div className="backdrop-blur-xl bg-gradient-to-br from-white/8 to-white/5 border border-purple-500/30 rounded-2xl p-8 shadow-2xl hover:shadow-purple-500/10 transition-all duration-300">
                             <div className="mb-8">
                                 <label className="block text-sm font-semibold text-slate-300 mb-3">Stake Amount</label>
                                 <div className="relative">
                                     <input
-                                        className="w-full bg-white/5 border border-emerald-400/30 rounded-xl px-6 py-4 text-white text-lg placeholder-slate-500 focus:outline-none focus:border-emerald-400/60 focus:bg-white/10 transition-all duration-300"
+                                        className="w-full bg-white/5 border border-purple-400/30 rounded-xl px-6 py-4 text-white text-lg placeholder-slate-500 focus:outline-none focus:border-purple-400/60 focus:bg-white/10 transition-all duration-300"
                                         value={stakeAmount}
                                         step="0.01"
                                         type="number"
                                         placeholder="Enter amount"
                                         onChange={handleStakeAmountChange}
                                     />
-                                    <span className="absolute right-6 top-1/2 -translate-y-1/2 text-emerald-400 font-semibold">
+                                    <span className="absolute right-6 top-1/2 -translate-y-1/2 text-purple-400 font-semibold">
                                         {STAKE_NAME}
                                     </span>
                                 </div>
@@ -279,13 +324,13 @@ export const Body = () => {
                                             onClick={() => handleDurationChange(button.id)}
                                             className={`relative px-4 py-3 rounded-xl font-semibold transition-all duration-300 overflow-hidden group ${
                                             button.isActive
-                                                ? "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-lg shadow-emerald-500/50"
-                                                : "bg-white/5 border border-slate-600/50 text-slate-300 hover:border-emerald-400/50 hover:bg-white/10"
+                                                ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg shadow-purple-500/50"
+                                                : "bg-white/5 border border-slate-600/50 text-slate-300 hover:border-purple-400/50 hover:bg-white/10"
                                             }`}
                                         >
                                             <span className="relative z-10">{button.durName}</span>
                                             {button.isActive && (
-                                                <div className="absolute inset-0 bg-gradient-to-r from-emerald-400 to-cyan-400 opacity-0 group-hover:opacity-20 transition-opacity duration-300" />
+                                                <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-pink-400 opacity-0 group-hover:opacity-20 transition-opacity duration-300" />
                                             )}
                                         </button>
                                     ))}
@@ -300,7 +345,7 @@ export const Body = () => {
                                     onClick={stake}
                                     disabled={loading}
                                 >
-                                    <div className="absolute inset-0 bg-gradient-to-r from-emerald-500 to-emerald-600 group-hover:from-emerald-400 group-hover:to-emerald-500 transition-all duration-300" />
+                                    <div className="absolute inset-0 bg-gradient-to-r from-purple-500 to-purple-600 group-hover:from-purple-400 group-hover:to-purple-500 transition-all duration-300" />
                                     <div className="absolute inset-0 opacity-0 group-hover:opacity-20 bg-white transition-opacity duration-300" />
                                     <span className="relative z-10 flex items-center justify-center gap-2">
                                         {loading ? "..." : `Stake ${STAKE_NAME}`}
@@ -312,7 +357,7 @@ export const Body = () => {
                                     onClick={unstake}
                                     disabled={loading}
                                 >
-                                    <div className="absolute inset-0 bg-gradient-to-r from-cyan-500 to-cyan-600 group-hover:from-cyan-400 group-hover:to-cyan-500 transition-all duration-300" />
+                                    <div className="absolute inset-0 bg-gradient-to-r from-pink-500 to-pink-600 group-hover:from-pink-400 group-hover:to-pink-500 transition-all duration-300" />
                                     <div className="absolute inset-0 opacity-0 group-hover:opacity-20 bg-white transition-opacity duration-300" />
                                     <span className="relative z-10 flex items-center justify-center gap-2">
                                         {loading ? "..." : `Unstake ${STAKE_NAME}`}
@@ -323,37 +368,37 @@ export const Body = () => {
                     </div>
                 
                     {/* Portfolio Card */}
-                    <div className="backdrop-blur-xl bg-gradient-to-br from-white/8 to-white/5 border border-cyan-500/30 rounded-2xl p-8 shadow-2xl hover:shadow-cyan-500/10 transition-all duration-300 h-fit">
-                        <h2 className="text-2xl font-bold text-cyan-300 mb-6">Portfolio</h2>
+                    <div className="backdrop-blur-xl bg-gradient-to-br from-white/8 to-white/5 border border-pink-500/30 rounded-2xl p-8 shadow-2xl hover:shadow-pink-500/10 transition-all duration-300 h-fit">
+                        <h2 className="text-2xl font-bold text-pink-300 mb-6">Portfolio</h2>
                         
                         <div className="space-y-4">
                             {/* Portfolio Info Items */}
                             
-                            <div className="bg-white/5 border border-emerald-400/20 rounded-xl p-4 hover:bg-white/10 transition-all duration-300">
+                            <div className="bg-white/5 border border-purple-400/20 rounded-xl p-4 hover:bg-white/10 transition-all duration-300">
                                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
                                     Stake Amount / Duration
                                 </p>
-                                <p className="text-xl font-bold text-emerald-300">
+                                <p className="text-xl font-bold text-purple-300">
                                     {stakedAmount} {STAKE_NAME}
                                 </p>
                                 <p className="text-sm text-slate-400 mt-1">{(stakedDuration || 0) / 86400} days</p>
                             </div>
 
-                            <div className="bg-white/5 border border-cyan-400/20 rounded-xl p-4 hover:bg-white/10 transition-all duration-300">
+                            <div className="bg-white/5 border border-pink-400/20 rounded-xl p-4 hover:bg-white/10 transition-all duration-300">
                                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Staking Time</p>
-                                <p className="text-sm font-mono text-cyan-300">
+                                <p className="text-sm font-mono text-pink-300">
                                     {stakeTime ? new Date(Number(stakeTime) * 1000).toLocaleString() : "N/A"}
                                 </p>
                             </div>
 
-                            <div className="bg-white/5 border border-emerald-400/20 rounded-xl p-4 hover:bg-white/10 transition-all duration-300">
+                            <div className="bg-white/5 border border-purple-400/20 rounded-xl p-4 hover:bg-white/10 transition-all duration-300">
                                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">APY</p>
-                                <p className="text-2xl font-bold text-emerald-300">50%</p>
+                                <p className="text-2xl font-bold text-purple-300">50%</p>
                             </div>
 
-                            <div className="bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-400/30 rounded-xl p-4 hover:from-emerald-500/30 hover:to-cyan-500/30 transition-all duration-300">
+                            <div className="bg-gradient-to-br from-purple-500/20 to-pink-500/20 border border-purple-400/30 rounded-xl p-4 hover:from-purple-500/30 hover:to-pink-500/30 transition-all duration-300">
                                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Pending Rewards</p>
-                                <p className="text-2xl font-bold text-transparent bg-gradient-to-r from-emerald-300 to-cyan-300 bg-clip-text">
+                                <p className="text-2xl font-bold text-transparent bg-gradient-to-r from-purple-300 to-pink-300 bg-clip-text">
                                     +{rewardAmount.toFixed(4)}
                                 </p>
                                 <p className="text-xs text-slate-400 mt-1">{STAKE_NAME}</p>
@@ -364,7 +409,7 @@ export const Body = () => {
                                 onClick={claimRewards}
                                 disabled={loading}
                             >
-                                <div className="absolute inset-0 bg-gradient-to-r from-emerald-500 via-cyan-500 to-emerald-500 group-hover:from-emerald-400 group-hover:via-cyan-400 group-hover:to-emerald-400 transition-all duration-300" />
+                                <div className="absolute inset-0 bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500 group-hover:from-purple-400 group-hover:via-pink-400 group-hover:to-purple-400 transition-all duration-300" />
                                 <div className="absolute inset-0 opacity-0 group-hover:opacity-30 bg-white transition-opacity duration-300" />
                                 <span className="relative z-10">{loading ? "Processing..." : "Claim Rewards"}</span>
                             </button>
