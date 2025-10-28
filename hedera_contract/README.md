@@ -16,5 +16,5 @@ The contract leverages Hedera’s EVM-compatible Smart Contract Service, ensurin
 ## 🚀 Deployment
 The contract is deployed on Hedera Testnet for development and testing.
 ```
-staking_contract = "0.0.1234567"
+staking_contract = https://hashscan.io/testnet/contract/0.0.7153225
 ```
