@@ -13,6 +13,20 @@ The contract leverages Hedera’s EVM-compatible Smart Contract Service, ensurin
 - Automated reward distribution logic
 - Transparent on-chain recordkeeping
 
+## Installation
+
+1. Clone the repository:
+
+```
+git clone <repository-url>
+cd contract
+```
+
+2. Install dependencies:
+```
+yarn install
+```
+
 ## 🚀 Deployment
 The contract is deployed on Hedera Testnet for development and testing.
 ```

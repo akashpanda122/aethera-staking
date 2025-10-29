@@ -32,3 +32,33 @@ A modern Next.js-based frontend for a Solana staking platform that allows users 
 - Transaction validation
 - Error handling
 - Protected admin routes
+
+## Getting Started
+1. Clone the repository:
+
+```
+git clone <repository-url>
+cd staking-new-frontend
+```
+
+2. Install dependencies:
+```
+npm install
+# or
+yarn install
+```
+
+3. Create a .env.local file in the root directory and add your environment variables:
+
+```
+NEXT_PUBLIC_RPC_URL=<your-hedera-rpc-url>
+```
+
+4. Run the development server:
+```
+npm run dev
+# or
+yarn dev
+```
+
+5. Open `http://localhost:3000` with your browser to see the result.
