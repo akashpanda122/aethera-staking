@@ -1,5 +1,7 @@
 # Aethera
 
+Here's the Pitch Deck - [https://drive.google.com/file/d/1LqxG8MSllAiDwOHHrqK7x_2jx_ntJn43/view?usp=sharing](https://drive.google.com/file/d/1LqxG8MSllAiDwOHHrqK7x_2jx_ntJn43/view?usp=sharing)
+
 ## 🧱 Project Structure
 
 `contracts/`
