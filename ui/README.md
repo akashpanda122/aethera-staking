@@ -1,11 +1,11 @@
 # Staking Platform
 
-A modern Next.js-based frontend for a Solana staking platform that allows users to stake SOL tokens and earn rewards. Built with Next.js 13+, TypeScript, and Solana Web3.js.
+A modern Next.js-based frontend for a Hedera staking platform that allows users to stake HBR tokens and earn rewards. Built with Next.js 13+, TypeScript, and Hedera Web3.js.
 
 ## Features
 
-- 🔐 Secure wallet connection using Solana Wallet Adapter
-- 💰 SOL token staking with multiple duration options
+- 🔐 Secure wallet connection using Hedera Wallet Adapter
+- 💰 HBR token staking with multiple duration options
 - 📊 Real-time balance and staking information
 - 🎯 Admin dashboard for platform management
 - 🎨 Modern UI with dark theme
